@@ -51,7 +51,8 @@ import java.util.Locale;
  * place stay Bebas Neue — the launcher's own face — so the card
  * still reads as part of the launcher. The frost is real: the
  * card's background is a blurred, tinted snapshot of the live
- * background video behind it, refreshed every 15 seconds, edges
+ * background video behind it, refreshed ~7 times a second so the
+ * scene keeps flowing behind the glass, edges
  * feathered so the card melts into the scene while staying
  * clearly present.
  *
@@ -64,7 +65,7 @@ public class WeatherWidget extends Widget {
     private static final double LAT = 37.4530;
     private static final double LON = -122.1817;
     private static final long REFRESH_MS = 30 * 60 * 1000L;
-    private static final long FROST_MS = 15 * 1000L;
+    private static final long FROST_MS = 150L;
     private static final String API =
         "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON
         + "&current=temperature_2m,apparent_temperature,weather_code"
@@ -277,6 +278,15 @@ public class WeatherWidget extends Widget {
     // from exactly the card's rectangle: downscaled hard (the
     // downscale itself does most of the softening), box-blurred,
     // tinted, then cut out with a feathered rounded-rect alpha mask.
+    // Snapshots retake ~7x/second so the scene keeps flowing behind
+    // the glass instead of freezing into a uniform wash. The readback
+    // is done at 1/3 scale (the frost's working size anyway), the
+    // feather mask is cached, and the previous frame is recycled on
+    // swap, so the faster cycle stays cheap.
+
+    private Bitmap frostMask;
+    private int frostMaskW, frostMaskH;
+    private Bitmap frostBitmap;
 
     private final Runnable frostLoop = new Runnable() {
         @Override public void run() {
@@ -289,19 +299,28 @@ public class WeatherWidget extends Widget {
     private void refreshFrost() {
         if (frostBusy || cardView == null || backgroundView == null) return;
         final int w = cardView.getWidth(), h = cardView.getHeight();
-        if (w == 0 || h == 0) return;
+        final int vw = backgroundView.getWidth(), vh = backgroundView.getHeight();
+        if (w == 0 || h == 0 || vw == 0 || vh == 0) return;
         final Bitmap frame;
         try {
-            frame = backgroundView.getBitmap();
+            // Read the surface back at the frost's 1/3 working scale:
+            // same pixels the pipeline would downscale to, a ninth
+            // of the readback cost of a full frame.
+            frame = backgroundView.getBitmap(
+                Math.max(2, vw / 3), Math.max(2, vh / 3));
         } catch (Exception e) {
             return;
         }
         if (frame == null) return;
         int[] loc = new int[2];
         cardView.getLocationOnScreen(loc);
-        final int x = loc[0], y = loc[1];
-        if (x < 0 || y < 0 || x + w > frame.getWidth() || y + h > frame.getHeight()
-                || isDark(frame, x, y, w, h)) {
+        float sx = frame.getWidth() / (float) vw;
+        float sy = frame.getHeight() / (float) vh;
+        final int cx = Math.round(loc[0] * sx), cy = Math.round(loc[1] * sy);
+        final int cw = Math.round(w * sx), ch = Math.round(h * sy);
+        if (cx < 0 || cy < 0 || cx + cw > frame.getWidth()
+                || cy + ch > frame.getHeight()
+                || isDark(frame, cx, cy, cw, ch)) {
             // Video not producing frames yet — keep the flat tint.
             frame.recycle();
             return;
@@ -310,7 +329,7 @@ public class WeatherWidget extends Widget {
         new Thread(() -> {
             Bitmap result = null;
             try {
-                result = makeFrost(frame, x, y, w, h);
+                result = makeFrost(frame, cx, cy, cw, ch, w, h);
             } catch (Exception ignored) {
             }
             frame.recycle();
@@ -319,8 +338,11 @@ public class WeatherWidget extends Widget {
                 frostBusy = false;
                 if (out == null) return;
                 if (running && cardView != null) {
+                    Bitmap prev = frostBitmap;
                     cardView.setBackground(
                         new BitmapDrawable(ctx.getResources(), out));
+                    frostBitmap = out;
+                    if (prev != null && prev != out) prev.recycle();
                 } else {
                     out.recycle();
                 }
@@ -328,20 +350,21 @@ public class WeatherWidget extends Widget {
         }, "weather-frost").start();
     }
 
-    private Bitmap makeFrost(Bitmap frame, int x, int y, int w, int h) {
-        Bitmap crop = Bitmap.createBitmap(frame, x, y, w, h);
+    private Bitmap makeFrost(Bitmap frame, int cx, int cy, int cw, int ch,
+                             int w, int h) {
+        Bitmap crop = Bitmap.createBitmap(frame, cx, cy, cw, ch);
         // Recipe B (picked 2026-11-16): a lighter hand — /3
         // downscale with saturation lifted 1.25, one blur pass, tint
         // alpha 26 — so the blurred scene reads through the card
-        // instead of flattening into a tinted slab.
-        int sw = Math.max(2, w / 3), sh = Math.max(2, h / 3);
-        Bitmap small = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
+        // instead of flattening into a tinted slab. The frame already
+        // arrives at the /3 scale, so the crop is the working size.
+        Bitmap small = Bitmap.createBitmap(cw, ch, Bitmap.Config.ARGB_8888);
         Canvas smallCanvas = new Canvas(small);
         Paint satPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
         ColorMatrix cm = new ColorMatrix();
         cm.setSaturation(1.25f);
         satPaint.setColorFilter(new ColorMatrixColorFilter(cm));
-        smallCanvas.drawBitmap(crop, null, new RectF(0, 0, sw, sh), satPaint);
+        smallCanvas.drawBitmap(crop, 0, 0, satPaint);
         crop.recycle();
         boxBlur(small, 5);
         Bitmap big = Bitmap.createScaledBitmap(small, w, h, true);
@@ -349,7 +372,18 @@ public class WeatherWidget extends Widget {
 
         Canvas canvas = new Canvas(big);
         canvas.drawColor(TINT);
+        Paint maskPaint = new Paint();
+        maskPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
+        canvas.drawBitmap(frostMask(w, h), 0, 0, maskPaint);
+        return big;
+    }
 
+    /** The feathered rounded-rect alpha mask, built once per size. */
+    private Bitmap frostMask(int w, int h) {
+        if (frostMask != null && frostMaskW == w && frostMaskH == h) {
+            return frostMask;
+        }
+        if (frostMask != null) frostMask.recycle();
         Bitmap mask = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas maskCanvas = new Canvas(mask);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -357,11 +391,10 @@ public class WeatherWidget extends Widget {
         float r = dp(22);
         maskCanvas.drawRoundRect(new RectF(0, 0, w, h), r, r, p);
         boxBlur(mask, 4);
-        Paint maskPaint = new Paint();
-        maskPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
-        canvas.drawBitmap(mask, 0, 0, maskPaint);
-        mask.recycle();
-        return big;
+        frostMask = mask;
+        frostMaskW = w;
+        frostMaskH = h;
+        return mask;
     }
 
     /** True when the sampled points are all near-black (no video yet). */
