@@ -146,7 +146,7 @@ public class WidgetHost extends FrameLayout {
 
     private void place(Widget w, int col, int row) {
         View v = w.view();
-        v.setLayoutParams(cellParams(w.colSpan(), w.rowSpan(), col, row));
+        v.setLayoutParams(cellParams(w, col, row));
         v.setFocusable(false);
         addView(v);
         placements.put(w.id(), new int[]{col, row});
@@ -170,14 +170,17 @@ public class WidgetHost extends FrameLayout {
         }
     }
 
-    private LayoutParams cellParams(int spanW, int spanH, int col, int row) {
+    private LayoutParams cellParams(Widget w, int col, int row) {
+        int spanW = w.colSpan(), spanH = w.rowSpan();
         int width = spanW * CELL_W_DP + (spanW - 1) * GUTTER_DP;
-        int height = spanH * CELL_H_DP + (spanH - 1) * GUTTER_DP;
+        int height = w.heightDp() > 0
+            ? w.heightDp()
+            : spanH * CELL_H_DP + (spanH - 1) * GUTTER_DP;
         LayoutParams lp = new LayoutParams(dp(width), dp(height));
         lp.gravity = Gravity.TOP | Gravity.START;
         lp.setMargins(
             dp(ORIGIN_X_DP + col * (CELL_W_DP + GUTTER_DP)),
-            dp(ORIGIN_Y_DP + row * (CELL_H_DP + GUTTER_DP)), 0, 0);
+            dp(ORIGIN_Y_DP + row * (CELL_H_DP + GUTTER_DP) + w.topInsetDp()), 0, 0);
         return lp;
     }
 
@@ -317,8 +320,7 @@ public class WidgetHost extends FrameLayout {
             if (cellsFree(ghostWidget, nc, nr)) {
                 ghostCol = nc;
                 ghostRow = nr;
-                ghost.setLayoutParams(cellParams(
-                    ghostWidget.colSpan(), ghostWidget.rowSpan(), nc, nr));
+                ghost.setLayoutParams(cellParams(ghostWidget, nc, nr));
             }
             return;
         }
@@ -329,7 +331,7 @@ public class WidgetHost extends FrameLayout {
         if (cellsFree(w, nc, nr)) {
             p[0] = nc;
             p[1] = nr;
-            v.setLayoutParams(cellParams(w.colSpan(), w.rowSpan(), nc, nr));
+            v.setLayoutParams(cellParams(w, nc, nr));
             save(w);
         }
     }
@@ -403,7 +405,7 @@ public class WidgetHost extends FrameLayout {
             LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
         labelLp.gravity = Gravity.CENTER;
         g.addView(label, labelLp);
-        g.setLayoutParams(cellParams(w.colSpan(), w.rowSpan(), ghostCol, ghostRow));
+        g.setLayoutParams(cellParams(w, ghostCol, ghostRow));
         addView(g);
         ghost = g;
         arm(g);

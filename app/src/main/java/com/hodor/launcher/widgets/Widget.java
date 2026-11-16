@@ -49,6 +49,24 @@ public abstract class Widget {
         return ANCHOR_GRID;
     }
 
+    /**
+     * Extra top inset (dp) the host applies inside this widget's
+     * cells when laying out its view. Placement, collision and
+     * persistence stay purely cell-based; this only aligns the
+     * drawn body to neighbouring fixed UI. Default 0.
+     */
+    public int topInsetDp() {
+        return 0;
+    }
+
+    /**
+     * Drawn height (dp) for this widget's view, or -1 to fill its
+     * cells exactly. See {@link #topInsetDp()}.
+     */
+    public int heightDp() {
+        return -1;
+    }
+
     void bindBackground(TextureView tv) {
         backgroundView = tv;
     }

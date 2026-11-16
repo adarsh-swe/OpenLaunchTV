@@ -32,6 +32,16 @@ drawn reference on 2026-11-16: see `docs/grid-reference.jpg`.
   rectangle from the shared constants (cell 218×100, gutter 10,
   origin x 28). No custom sizes or off-grid offsets; same span =
   same size, anywhere on screen. The host rejects off-grid spans.
+- One drawn-body exception (2026-11-16: "make it uniform,
+  however you achieve that"): the weather card's drawn body is
+  inset within its A3+A4 cells to frame the clock block's measured
+  glyph extent with ~4dp of air (top 36dp, height 101dp, vs the
+  row's 28/100), so the two header blocks read as one band. An
+  exact-extent card (93dp) read as shorter than the clock — the
+  frost's feathered edge eats visible body. Placement, collision
+  and persistence remain purely cell-based; the host exposes this
+  as Widget.topInsetDp()/heightDp() hooks, defaulting to exact
+  cell fill.
 - A widget may instead anchor TOP_RIGHT (2026-11-16):
   the top row's rightmost cells, computed from the same grid —
   a 2-wide widget lands exactly on A3+A4 (x 484, y 28). The
