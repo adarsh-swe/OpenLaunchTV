@@ -2,8 +2,6 @@
 
 A minimal Android TV home screen. One activity, zero dependencies, no ads, no recommendations — just a clock, your apps, widgets, and a background that moves.
 
-![Home screen](docs/screenshots/home-screen.jpg)
-
 The frosted weather card is live — the background video keeps flowing behind the glass:
 
 ![Live frost demo](docs/live-frost.gif)
@@ -20,16 +18,12 @@ The frosted weather card is live — the background video keeps flowing behind t
   - **Uninstall** — system apps open their App Info page instead
 - Focus is the icon itself: it scales up with a soft shadow. No cards, no rails, no "sponsored" anything.
 
-![Focus state (render)](docs/screenshots/focus-state.jpg)
-
 ## Widgets
 
 Widgets are self-contained mini-apps that live on a 4×3 grid over the home screen (see [LAYOUT.md](LAYOUT.md)). Each widget owns its data, its refresh cycle and its rendering; the launcher only gives it whole grid cells and start/stop signals.
 
 - **Weather** — current conditions plus a 3-day forecast for your location, fetched from [Open-Meteo](https://open-meteo.com) (free, no API key — set your coordinates in `WeatherWidget`). The card is frosted glass: a blurred, lightly tinted cutout of the live background behind it, re-rendered several times a second so the scene keeps flowing behind the glass. This is the launcher's only network call.
 - **Move / remove / add** — open the overflow grid and pick the **Widgets** tile. In edit mode the d-pad moves the focused widget cell by cell (grid-snapped, collision-checked; the clock's cells are reserved), ENTER finishes, MENU removes the widget, BACK exits. Removed widgets wait in a pool as a "+ NAME" outline — steer it to a free cell and press ENTER to put the widget back. Placements persist across restarts.
-
-![Widget edit mode](docs/screenshots/widget-edit-mode.jpg)
 
 ## Requirements
 
