@@ -5,6 +5,7 @@
     <!-- A launcher needs to see the TV's launchable apps. QUERY_ALL_PACKAGES
          is restricted on Play but this is a sideloaded personal app. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

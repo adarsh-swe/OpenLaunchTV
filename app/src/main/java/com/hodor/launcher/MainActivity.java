@@ -1,6 +1,8 @@
 package com.hodor.launcher;
 
 import android.app.Activity;
+import com.hodor.launcher.widgets.WeatherWidget;
+import com.hodor.launcher.widgets.WidgetHost;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -40,6 +42,7 @@ import android.view.KeyEvent;
 import android.view.Surface;
 import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
@@ -95,7 +98,8 @@ import java.util.Set;
  *    designs bundled for that app, and letter monograms rendered
  *    on-device. The pick is stored per package and survives restarts.
  *  - Uninstall: hands off to the system's own confirmation dialog.
- * TV Settings has no bar tile: the header gear is the only door.
+ * TV Settings has no bar tile: it lives as a tile in the overflow
+ * section (MENU opens it too).
  */
 public class MainActivity extends Activity {
 
@@ -200,6 +204,7 @@ public class MainActivity extends Activity {
     }
 
     private FrameLayout rootFrame;
+    private WidgetHost widgetHost;
     private TextureView bgVideo;
     private MediaPlayer bgPlayer;
     private Surface bgSurface;
@@ -216,8 +221,6 @@ public class MainActivity extends Activity {
     private TextView pickerTitle;
     private TextView clockView;
     private TextView dateView;
-    /** Id of the header settings gear, so bar tiles can aim UP at it. */
-    private int settingsButtonId = View.NO_ID;
 
     /** Every launchable app, in saved order. Hidden ones included. */
     private List<AppEntry> currentApps = new ArrayList<>();
@@ -275,6 +278,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         clockHandler.post(clockTick);
+        if (widgetHost != null) widgetHost.startWidgets();
         if (appsDirty) reloadApps();
         if (bgPlayer != null) {
             try {
@@ -288,6 +292,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         clockHandler.removeCallbacks(clockTick);
+        if (widgetHost != null) widgetHost.stopWidgets();
         if (bgPlayer != null) {
             try {
                 if (bgPlayer.isPlaying()) bgPlayer.pause();
@@ -344,6 +349,15 @@ public class MainActivity extends Activity {
                 }
                 return super.dispatchKeyEvent(event);
             }
+            // Widget edit mode owns the keys: BACK exits, everything
+            // else goes to the focused widget or ghost untouched.
+            if (widgetHost != null && widgetHost.isEditMode()) {
+                if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                    widgetHost.exitEditMode();
+                    return true;
+                }
+                return super.dispatchKeyEvent(event);
+            }
             if (pickerOpen && moveIndex < 0
                     && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
                 closeIconPicker();
@@ -358,20 +372,19 @@ public class MainActivity extends Activity {
             // An unhandled DOWN falls through to the horizontal scroller,
             // which on this TV answers it by scrolling sideways — swallow
             // it while focus is in the bar. Expanded, the overflow grid IS
-            // below, so DOWN goes through to focus search. (Focus on the
-            // gear must still get its DOWN, which is how you come back to
-            // the bar.) Same for UP pressed while the gear is focused:
-            // nothing is above it.
+            // below, so DOWN goes through to focus search. Nothing is
+            // above the bar either (the header holds no focusables, and
+            // the corner gear is gone), so UP is swallowed the same way.
             if (!pickerOpen && moveIndex < 0) {
                 View focus = getCurrentFocus();
-                if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN
-                        && !expanded
-                        && focus != null && isDescendantOf(focus, barScroll)) {
-                    return true;
-                }
-                if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP
-                        && focus != null && focus.getId() == settingsButtonId) {
-                    return true;
+                if (focus != null && isDescendantOf(focus, barScroll)) {
+                    if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN
+                            && !expanded) {
+                        return true;
+                    }
+                    if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
+                        return true;
+                    }
                 }
             }
             if (moveIndex >= 0) {
@@ -518,28 +531,30 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT));
 
-        root.setPadding(dp(28), dp(36), dp(28), dp(28));
+        root.setPadding(dp(28), dp(28), dp(28), dp(28));
         root.setClipChildren(false);
         rootFrame.addView(root, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // Header: clock + date on the left.
+        // Header: clock + date on the left. The header IS grid row A
+        // (LAYOUT.md): exactly one cell tall (100dp) from y=28, and the
+        // clock block spans A1+A2 — time at the top of the row, date
+        // pinned to its bottom, nothing hanging into row B.
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.TOP);
         header.setClipChildren(false);
         header.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT));
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(100)));
 
         LinearLayout clockBlock = new LinearLayout(this);
         clockBlock.setOrientation(LinearLayout.VERTICAL);
         clockBlock.setLayoutParams(new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
 
         // Bebas Neue (bundled in assets) for the clock + date — tall,
-        // condensed display face. Bebas runs
+        // condensed display face picked 2026-11-15. Bebas runs
         // narrow, so the clock goes bigger than the old 54sp stock face
         // to keep the same presence.
         Typeface bebas = Typeface.createFromAsset(getAssets(), "fonts/bebas-neue.ttf");
@@ -548,50 +563,36 @@ public class MainActivity extends Activity {
         clockView.setTextColor(getColor(R.color.text_primary));
         clockView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 68);
         clockView.setTypeface(bebas);
+        clockView.setIncludeFontPadding(false);
 
         dateView = new TextView(this);
         dateView.setTextColor(getColor(R.color.text_secondary));
         dateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         dateView.setTypeface(bebas);
         dateView.setLetterSpacing(0.06f);
+        dateView.setIncludeFontPadding(false);
 
         clockBlock.addView(clockView);
+        // Spacer: pushes the date to the bottom of row A.
+        View clockSpacer = new View(this);
+        clockSpacer.setLayoutParams(new LinearLayout.LayoutParams(1, 0, 1f));
+        clockBlock.addView(clockSpacer);
         clockBlock.addView(dateView);
         header.addView(clockBlock);
 
         root.addView(header);
 
-        // Settings gear: a rootFrame overlay pinned to the physical
-        // top-right corner (14dp in from each edge), NOT a header child —
-        // inside the LinearLayout chain it sat lower than the corner and
-        // a translation push toward the corner rendered it cut on the TV.
-        // As an overlay nothing can clip it.
-        // Flat and dim at rest; on focus the gear itself turns white and
-        // grows slightly — no halo, no ring.
-        ImageView settingsBtn = new ImageView(this);
-        settingsButtonId = View.generateViewId();
-        settingsBtn.setId(settingsButtonId);
-        settingsBtn.setImageDrawable(getDrawable(R.drawable.ic_settings));
-        settingsBtn.setFocusable(true);
-        settingsBtn.setClickable(true);
-        settingsBtn.setPadding(dp(13), dp(13), dp(13), dp(13));
-        FrameLayout.LayoutParams sbParams = new FrameLayout.LayoutParams(dp(56), dp(56));
-        sbParams.gravity = Gravity.TOP | Gravity.END;
-        sbParams.setMargins(0, dp(14), dp(14), 0);
-        settingsBtn.setLayoutParams(sbParams);
-        settingsBtn.setOnClickListener(v -> startActivity(
-            new Intent(Settings.ACTION_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
-        settingsBtn.setOnFocusChangeListener((v, hasFocus) -> {
-            // No halo, no ring: the gear just turns white and grows a touch.
-            ((ImageView) v).setImageDrawable(getDrawable(
-                hasFocus ? R.drawable.ic_settings_glow : R.drawable.ic_settings));
-            float s = hasFocus ? 1.12f : 1.0f;
-            v.setScaleX(s);
-            v.setScaleY(s);
-        });
-        rootFrame.addView(settingsBtn);
-
+        // Widget layer: self-contained widget apps (see widgets/).
+        // Each widget owns its data and refresh; placements persist
+        // and are the user's to move, remove and re-add in edit mode
+        // (the Widgets tile in the overflow section).
+        widgetHost = new WidgetHost(this);
+        widgetHost.registerWidget(new WeatherWidget(this));
+        widgetHost.setBackgroundView(bgVideo);
+        widgetHost.setEditModeListener(this::focusBarFirstTile);
+        rootFrame.addView(widgetHost, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT));
 
         // Content area: the home column (bar + overflow), or the icon picker.
         FrameLayout content = new FrameLayout(this);
@@ -873,12 +874,6 @@ public class MainActivity extends Activity {
         expandTileView = expandShell.getChildAt(0);
         tiles.add(expandTileView);
 
-        // Aim UP from any bar tile at the settings gear — spatial focus
-        // search alone won't cross the header's full width reliably.
-        if (settingsButtonId != View.NO_ID) {
-            for (View t : tiles) t.setNextFocusUpId(settingsButtonId);
-        }
-
         if (!pickerOpen) {
             View target = (focusIndex >= 0 && focusIndex < tiles.size())
                 ? tiles.get(focusIndex) : tiles.get(0);
@@ -890,6 +885,11 @@ public class MainActivity extends Activity {
 
     private void populateAllApps() {
         allAppsGrid.removeAllViews();
+        // Settings lives here now (2026-11-16): a tile in the
+        // overflow section instead of a floating gear — the top-right
+        // corner belongs to the weather widget.
+        allAppsGrid.addView(makeSettingsTile());
+        allAppsGrid.addView(makeWidgetsTile());
         int shown = 0;
         for (AppEntry app : currentApps) {
             if (!hiddenPkgs.contains(app.component.getPackageName())) continue;
@@ -966,7 +966,7 @@ public class MainActivity extends Activity {
     private final Map<String, Drawable> cleanIconCache = new HashMap<>();
 
     /**
-     * The tile icon: the app's art rendered
+     * The tile icon (2026-11-15): the app's art rendered
      * full-bleed to a uniform square, original colours kept (a
      * filter-based dark mode was tried and dropped the same night —
      * it mangled the art). Corner rounding lives on the VIEW's outline
@@ -1362,7 +1362,6 @@ public class MainActivity extends Activity {
         icon.setFocusable(true);
         icon.setClickable(true);
         icon.setContentDescription(app.label);
-        icon.setNextFocusUpId(settingsButtonId);
         icon.setOutlineAmbientShadowColor(0xFF000000);
         icon.setOutlineSpotShadowColor(0xFF000000);
         float radius = dp(34);
@@ -1468,6 +1467,128 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * The Settings tile in the overflow grid: the gear glyph + label,
+     * styled like the app tiles, but it fires the system Settings
+     * intent and has no long-press menu — it isn't an app entry. It
+     * replaced the floating corner gear (2026-11-16), which
+     * made room for the weather widget in the top-right corner.
+     */
+    private FrameLayout makeSettingsTile() {
+        FrameLayout shell = tileShell(false);
+
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        cell.setLayoutParams(new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT));
+        cell.setPadding(dp(6), dp(10), dp(6), dp(10));
+        cell.setFocusable(true);
+        cell.setClickable(true);
+
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(getDrawable(R.drawable.ic_settings));
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setPadding(dp(20), dp(20), dp(20), dp(20));
+        icon.setLayoutParams(new LinearLayout.LayoutParams(dp(95), dp(95)));
+        cell.addView(icon);
+
+        View label = makeLabelView("Settings", 15);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        labelParams.setMargins(0, dp(8), 0, 0);
+        label.setLayoutParams(labelParams);
+        cell.addView(label);
+
+        cell.setOnClickListener(v -> startActivity(
+            new Intent(Settings.ACTION_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+        cell.setOnFocusChangeListener((v, hasFocus) -> {
+            icon.setImageDrawable(getDrawable(hasFocus
+                ? R.drawable.ic_settings_glow : R.drawable.ic_settings));
+            v.setBackground(hasFocus
+                ? getDrawable(R.drawable.grid_focus_glow) : null);
+            float scale = hasFocus ? 1.10f : 1.0f;
+            shell.setScaleX(scale);
+            shell.setScaleY(scale);
+        });
+
+        shell.addView(cell);
+        return shell;
+    }
+
+    /**
+     * The Widgets tile in the overflow grid, next to Settings: opens
+     * the widget host's edit mode, where placed widgets can be moved
+     * on the grid, removed to the pool, and pooled widgets added.
+     */
+    private FrameLayout makeWidgetsTile() {
+        FrameLayout shell = tileShell(false);
+
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        cell.setLayoutParams(new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT));
+        cell.setPadding(dp(6), dp(10), dp(6), dp(10));
+        cell.setFocusable(true);
+        cell.setClickable(true);
+
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(getDrawable(R.drawable.ic_widgets));
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setPadding(dp(20), dp(20), dp(20), dp(20));
+        icon.setLayoutParams(new LinearLayout.LayoutParams(dp(95), dp(95)));
+        cell.addView(icon);
+
+        View label = makeLabelView("Widgets", 15);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        labelParams.setMargins(0, dp(8), 0, 0);
+        label.setLayoutParams(labelParams);
+        cell.addView(label);
+
+        cell.setOnClickListener(v -> {
+            setExpanded(false);
+            widgetHost.post(() -> widgetHost.enterEditMode());
+        });
+        cell.setOnFocusChangeListener((v, hasFocus) -> {
+            icon.setImageDrawable(getDrawable(hasFocus
+                ? R.drawable.ic_widgets_glow : R.drawable.ic_widgets));
+            v.setBackground(hasFocus
+                ? getDrawable(R.drawable.grid_focus_glow) : null);
+            float scale = hasFocus ? 1.10f : 1.0f;
+            shell.setScaleX(scale);
+            shell.setScaleY(scale);
+        });
+
+        shell.addView(cell);
+        return shell;
+    }
+
+    /** After widget edit mode ends: d-pad focus back on the bar. */
+    private void focusBarFirstTile() {
+        View target = findFocusable(bar);
+        if (target != null) target.post(target::requestFocus);
+    }
+
+    private static View findFocusable(View v) {
+        if (v == null) return null;
+        if (v.isFocusable() && v.getVisibility() == View.VISIBLE) return v;
+        if (v instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) v;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findFocusable(group.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /**
      * The bar's last entry: the expand arrow. A chevron on a dusk-indigo
      * gradient in the background scene's family — not a grey box. It
      * toggles the overflow section below the bar and flips to point up
@@ -1489,7 +1610,6 @@ public class MainActivity extends Activity {
         icon.setFocusable(true);
         icon.setClickable(true);
         icon.setContentDescription(expanded ? "Fewer apps" : "More apps");
-        icon.setNextFocusUpId(settingsButtonId);
         icon.setOutlineAmbientShadowColor(0xFF000000);
         icon.setOutlineSpotShadowColor(0xFF000000);
         float radius = dp(34);
