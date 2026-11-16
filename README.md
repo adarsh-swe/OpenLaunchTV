@@ -45,6 +45,11 @@ adb install -r openlaunch-tv.apk
 
 Then press Home and pick OpenLaunchTV (or set it under Settings → Apps → Default apps → Home app).
 
+## Branches
+
+- **`stable`** — the vetted checkout. Only code that has been built and verified running on a real TV gets promoted here. Build from this one.
+- **`latest`** — the newest work: verified builds that have not been promoted to stable yet.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
