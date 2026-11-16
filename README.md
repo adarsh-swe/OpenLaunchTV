@@ -1,4 +1,4 @@
-# Hodor Launcher
+# OpenLaunchTV
 
 A minimal Android TV home screen. One activity, zero dependencies, no ads, no recommendations, no network calls — just a clock, your apps, and a background that moves.
 
@@ -30,7 +30,7 @@ Two ways:
 **Script (no Gradle):** needs a JDK 17 and the Android SDK (platform 34, build-tools 34.0.0) —
 
 ```sh
-./build.sh   # produces hodor-launcher.apk, debug-signed and sideloadable
+./build.sh   # produces openlaunch-tv.apk, debug-signed and sideloadable
 ```
 
 `build.sh` runs the toolchain directly (aapt2 → javac → d8 → zipalign → apksigner) and honours `JAVA_HOME` / `ANDROID_SDK` if set.
@@ -40,10 +40,10 @@ Two ways:
 ## Install
 
 ```sh
-adb install -r hodor-launcher.apk
+adb install -r openlaunch-tv.apk
 ```
 
-Then press Home and pick Hodor Launcher (or set it under Settings → Apps → Default apps → Home app).
+Then press Home and pick OpenLaunchTV (or set it under Settings → Apps → Default apps → Home app).
 
 ## License
 

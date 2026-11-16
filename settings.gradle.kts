@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "HodorLauncher"
+rootProject.name = "OpenLaunchTV"
 include(":app")

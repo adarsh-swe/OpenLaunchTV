@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Manual APK build for Hodor Launcher — no Gradle.
+# Manual APK build for OpenLaunchTV — no Gradle.
 #
 # Why: on this VM the Gradle daemon's loopback connection never reaches the
 # daemon (the sandbox intercepts it), so builds here run the toolchain
@@ -55,7 +55,7 @@ if [ ! -f "$KS" ]; then
         -dname "CN=Android Debug,O=Android,C=US"
 fi
 "$BT/apksigner" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
-    --out hodor-launcher.apk "$OUT/app-aligned.apk"
+    --out openlaunch-tv.apk "$OUT/app-aligned.apk"
 
-echo "Built: $(pwd)/hodor-launcher.apk"
-ls -la hodor-launcher.apk
+echo "Built: $(pwd)/openlaunch-tv.apk"
+ls -la openlaunch-tv.apk
