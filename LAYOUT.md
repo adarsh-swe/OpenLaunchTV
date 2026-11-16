@@ -5,7 +5,7 @@ nothing ships off-grid. Set 2026-11-15, revised the same night at
 Direction: the whole top is free space, widgets may span
 multiple cells — but never 3 wide, and only ever whole cells.
 Row heights were spread evenly and the grid confirmed against a
-drawn reference on 2026-11-16: see `docs/grid-reference.jpg`.
+drawn reference on 2026-11-16.
 
 ## Canvas
 
