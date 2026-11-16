@@ -36,21 +36,24 @@ import java.util.Locale;
 /**
  * Weather widget — a self-contained bundle. It queries Open-Meteo
  * itself (no API key), on its own thread, every 30 minutes while the
- * launcher is in the foreground, and renders a frosted card: big
- * temperature, place / condition / hi-lo, then three forecast
- * columns. On any fetch failure it simply keeps the last good data
- * on screen.
+ * launcher is in the foreground, and renders a frosted card: a
+ * pictogram and big temperature, place / condition / feels-like,
+ * then three forecast columns. On any fetch failure it simply
+ * keeps the last good data on screen.
  *
- * Design (2026-11-16): anchored in the top-right corner
- * itself (the settings gear that used to sit there is now a tile in
- * the overflow section), balancing the clock across the top of the
- * screen.
- * Type is Bebas Neue throughout — the launcher's own face — with the
- * date line's letterspaced caps, so the card reads as part of the
- * launcher. The frost is real: the card's background is a blurred,
- * tinted snapshot of the live background video behind it, refreshed
- * every 15 seconds, edges feathered so the card melts into the
- * scene while staying clearly present.
+ * Design (2026-11-16): anchored in the top-right corner itself
+ * (the settings gear that used to sit there is now a tile in the
+ * overflow section), balancing the clock across the top of the
+ * screen. The content follows the iOS Weather widget's clarity
+ * (reference photo, 2026-11-16): filled white pictograms drawn
+ * on canvas instead of unicode glyphs, the condition in a bold
+ * sans sentence case, and a Feels-like line. Temperature and
+ * place stay Bebas Neue — the launcher's own face — so the card
+ * still reads as part of the launcher. The frost is real: the
+ * card's background is a blurred, tinted snapshot of the live
+ * background video behind it, refreshed every 15 seconds, edges
+ * feathered so the card melts into the scene while staying
+ * clearly present.
  *
  * Occupies 2x1 cells (446x100dp).
  */
@@ -64,7 +67,7 @@ public class WeatherWidget extends Widget {
     private static final long FROST_MS = 15 * 1000L;
     private static final String API =
         "https://api.open-meteo.com/v1/forecast?latitude=" + LAT + "&longitude=" + LON
-        + "&current=temperature_2m,weather_code"
+        + "&current=temperature_2m,apparent_temperature,weather_code"
         + "&daily=temperature_2m_max,temperature_2m_min,weather_code"
         + "&forecast_days=3&timezone=America%2FLos_Angeles";
 
@@ -83,9 +86,10 @@ public class WeatherWidget extends Widget {
     private volatile boolean frostBusy;
 
     private LinearLayout cardView;
+    private WeatherIcon iconView;
     private TextView tempView, placeView, condView, hiloView;
     private final TextView[] dayViews = new TextView[3];
-    private final TextView[] glyphViews = new TextView[3];
+    private final WeatherIcon[] dayIcons = new WeatherIcon[3];
     private final TextView[] rangeViews = new TextView[3];
 
     public WeatherWidget(Context ctx) {
@@ -97,6 +101,17 @@ public class WeatherWidget extends Widget {
     @Override public int colSpan() { return 2; }
     @Override public int rowSpan() { return 1; }
     @Override public int anchor() { return ANCHOR_TOP_RIGHT; }
+
+    // The drawn card frames the clock block's measured glyph
+    // extent (TV frame, 2026-11-16: time glyphs 40.5dp, date
+    // glyphs end 133dp) with ~4dp of air on each side, so the two
+    // header blocks read as one uniform band. (An exact-extent
+    // 93dp card read as shorter than the clock — the frost's
+    // feathered edge eats ~2dp of visible body per side.)
+    // Placement stays cell-based. Re-measure if the clock's
+    // type sizes change.
+    @Override public int topInsetDp() { return 8; }
+    @Override public int heightDp() { return 101; }
 
     // ---- view ------------------------------------------------------
 
@@ -113,7 +128,15 @@ public class WeatherWidget extends Widget {
         card.setBackground(flat);
         cardView = card;
 
+        iconView = new WeatherIcon(ctx);
+        iconView.setLayoutParams(new LinearLayout.LayoutParams(dp(54), dp(54)));
+        card.addView(iconView);
+
         tempView = text("––°", 59, bebas, TEXT);
+        LinearLayout.LayoutParams tempLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tempLp.setMargins(dp(6), 0, 0, 0);
+        tempView.setLayoutParams(tempLp);
         card.addView(tempView);
 
         LinearLayout stack = new LinearLayout(ctx);
@@ -124,10 +147,9 @@ public class WeatherWidget extends Widget {
         stack.setLayoutParams(stackLp);
         placeView = text(PLACE.toUpperCase(Locale.US), 18, bebas, TEXT);
         placeView.setLetterSpacing(0.06f);
-        condView = text(" ", 15, bebas, TEXT_DIM);
-        condView.setLetterSpacing(0.06f);
-        hiloView = text(" ", 15, bebas, TEXT_DIM);
-        hiloView.setLetterSpacing(0.06f);
+        condView = text(" ", 15, Typeface.SANS_SERIF, TEXT);
+        condView.setTypeface(Typeface.SANS_SERIF, Typeface.BOLD);
+        hiloView = text(" ", 11, Typeface.SANS_SERIF, TEXT_DIM);
         stack.addView(placeView);
         stack.addView(condView);
         stack.addView(hiloView);
@@ -149,13 +171,13 @@ public class WeatherWidget extends Widget {
             dayViews[i] = text(" ", 13, bebas, TEXT_DIM);
             dayViews[i].setGravity(Gravity.CENTER);
             dayViews[i].setLetterSpacing(0.06f);
-            glyphViews[i] = text(" ", 19, Typeface.SANS_SERIF, TEXT);
-            glyphViews[i].setGravity(Gravity.CENTER);
+            dayIcons[i] = new WeatherIcon(ctx);
+            dayIcons[i].setLayoutParams(new LinearLayout.LayoutParams(dp(24), dp(24)));
             rangeViews[i] = text(" ", 13, bebas, TEXT_FAINT);
             rangeViews[i].setGravity(Gravity.CENTER);
             rangeViews[i].setLetterSpacing(0.06f);
             col.addView(dayViews[i]);
-            col.addView(glyphViews[i]);
+            col.addView(dayIcons[i]);
             col.addView(rangeViews[i]);
             card.addView(col);
         }
@@ -221,6 +243,7 @@ public class WeatherWidget extends Widget {
             JSONArray min = daily.getJSONArray("temperature_2m_min");
             JSONArray codes = daily.getJSONArray("weather_code");
             final int temp = (int) Math.round(cur.getDouble("temperature_2m"));
+            final int feels = (int) Math.round(cur.getDouble("apparent_temperature"));
             final int code = cur.getInt("weather_code");
             final String[] days = new String[3];
             final int[] his = new int[3], los = new int[3], dayCodes = new int[3];
@@ -234,12 +257,13 @@ public class WeatherWidget extends Widget {
                 dayCodes[i] = codes.getInt(i);
             }
             main.post(() -> {
+                iconView.setCode(code);
                 tempView.setText(temp + "°");
-                condView.setText(condition(code).toUpperCase(Locale.US));
-                hiloView.setText("H:" + his[0] + "°  L:" + los[0] + "°");
+                condView.setText(sentence(condition(code)));
+                hiloView.setText("Feels " + feels + "° · H:" + his[0] + "° L:" + los[0] + "°");
                 for (int i = 0; i < 3; i++) {
                     dayViews[i].setText(days[i]);
-                    glyphViews[i].setText(glyph(dayCodes[i]));
+                    dayIcons[i].setCode(dayCodes[i]);
                     rangeViews[i].setText(his[i] + "° " + los[i] + "°");
                 }
             });
@@ -427,15 +451,115 @@ public class WeatherWidget extends Widget {
         }
     }
 
-    private static String glyph(int code) {
-        switch (code) {
-            case 0: case 1: return "☀";
-            case 95: case 96: case 99: return "⚡";
-            case 71: case 73: case 75: case 77: case 85: case 86: return "❄";
-            case 51: case 53: case 55: case 56: case 57:
-            case 61: case 63: case 65: case 66: case 67:
-            case 80: case 81: case 82: return "☂";
-            default: return "☁";
+    /** "Mainly Clear" -> "Mainly clear" (iOS-widget sentence case). */
+    private static String sentence(String s) {
+        if (s == null || s.length() < 2) return s;
+        return s.substring(0, 1) + s.substring(1).toLowerCase(Locale.US);
+    }
+
+    /**
+     * Filled white weather pictogram, drawn on canvas — the iOS
+     * Weather widget's icon language (sun, cloud, rain, snow,
+     * thunder, fog) instead of unicode glyphs, which rendered thin
+     * and inconsistent at TV distance. Same shapes as the preview
+     * harness's draw_icon.
+     */
+    static class WeatherIcon extends View {
+        private int code = -1;
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        WeatherIcon(Context ctx) {
+            super(ctx);
+            fill.setColor(Color.WHITE);
+            fill.setStyle(Paint.Style.FILL);
+            stroke.setColor(Color.WHITE);
+            stroke.setStyle(Paint.Style.STROKE);
+            stroke.setStrokeCap(Paint.Cap.ROUND);
+        }
+
+        void setCode(int c) {
+            if (c != code) {
+                code = c;
+                invalidate();
+            }
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            if (code < 0) return;
+            float s = Math.min(getWidth(), getHeight());
+            float cx = getWidth() / 2f, cy = getHeight() / 2f;
+            switch (code) {
+                case 0:
+                    sun(canvas, cx, cy, s * 0.30f);
+                    break;
+                case 1: case 2:
+                    sun(canvas, cx - s * 0.20f, cy - s * 0.20f, s * 0.20f);
+                    cloud(canvas, cx + s * 0.06f, cy + s * 0.14f, s * 0.78f);
+                    break;
+                case 45: case 48:
+                    cloud(canvas, cx, cy - s * 0.12f, s * 0.92f);
+                    stroke.setStrokeWidth(Math.max(2f, s * 0.07f));
+                    canvas.drawLine(cx - s * 0.30f, cy + s * 0.30f,
+                        cx + s * 0.30f, cy + s * 0.30f, stroke);
+                    canvas.drawLine(cx - s * 0.30f, cy + s * 0.46f,
+                        cx + s * 0.30f, cy + s * 0.46f, stroke);
+                    break;
+                case 71: case 73: case 75: case 77: case 85: case 86:
+                    cloud(canvas, cx, cy - s * 0.16f, s * 0.92f);
+                    for (float dx : new float[]{-0.24f, 0f, 0.24f}) {
+                        canvas.drawCircle(cx + s * dx, cy + s * 0.36f, s * 0.055f, fill);
+                    }
+                    break;
+                case 95: case 96: case 99: {
+                    cloud(canvas, cx, cy - s * 0.18f, s * 0.92f);
+                    float bx = cx + s * 0.02f, by = cy + s * 0.16f;
+                    android.graphics.Path bolt = new android.graphics.Path();
+                    bolt.moveTo(bx + s * 0.10f, by);
+                    bolt.lineTo(bx - s * 0.12f, by + s * 0.30f);
+                    bolt.lineTo(bx - s * 0.01f, by + s * 0.30f);
+                    bolt.lineTo(bx - s * 0.10f, by + s * 0.52f);
+                    bolt.lineTo(bx + s * 0.14f, by + s * 0.20f);
+                    bolt.lineTo(bx + s * 0.03f, by + s * 0.20f);
+                    bolt.close();
+                    canvas.drawPath(bolt, fill);
+                    break;
+                }
+                case 51: case 53: case 55: case 56: case 57:
+                case 61: case 63: case 65: case 66: case 67:
+                case 80: case 81: case 82:
+                    cloud(canvas, cx, cy - s * 0.16f, s * 0.92f);
+                    stroke.setStrokeWidth(Math.max(2f, s * 0.075f));
+                    for (float dx : new float[]{-0.24f, 0f, 0.24f}) {
+                        canvas.drawLine(cx + s * dx + s * 0.05f, cy + s * 0.26f,
+                            cx + s * dx - s * 0.03f, cy + s * 0.46f, stroke);
+                    }
+                    break;
+                default:
+                    cloud(canvas, cx, cy, s * 0.98f);
+            }
+        }
+
+        private void sun(Canvas canvas, float cx, float cy, float r) {
+            stroke.setStrokeWidth(Math.max(2f, r * 0.34f));
+            for (int k = 0; k < 8; k++) {
+                double a = Math.toRadians(k * 45);
+                canvas.drawLine(
+                    cx + (float) Math.cos(a) * r * 1.3f, cy + (float) Math.sin(a) * r * 1.3f,
+                    cx + (float) Math.cos(a) * r * 1.78f, cy + (float) Math.sin(a) * r * 1.78f,
+                    stroke);
+            }
+            canvas.drawCircle(cx, cy, r, fill);
+        }
+
+        private void cloud(Canvas canvas, float cx, float cy, float w) {
+            float h = w * 0.62f;
+            canvas.drawCircle(cx - w * 0.12f, cy - h * 0.16f, w * 0.20f, fill);
+            canvas.drawCircle(cx + w * 0.19f, cy - h * 0.30f, w * 0.24f, fill);
+            RectF base = new RectF(cx - w * 0.5f, cy - h * 0.10f,
+                cx + w * 0.5f, cy + h * 0.42f);
+            canvas.drawRoundRect(base, h * 0.30f, h * 0.30f, fill);
         }
     }
 }
