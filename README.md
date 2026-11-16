@@ -47,7 +47,7 @@ Then press Home and pick OpenLaunchTV (or set it under Settings → Apps → Def
 
 ## Branches
 
-- **`stable`** — the vetted checkout. Only code that has been built and verified running on a real TV gets promoted here. Build from this one.
+- **`main`** — the stable checkout. Only code that has been built and verified running on a real TV gets promoted here. Build from this one.
 - **`latest`** — the newest work: verified builds that have not been promoted to main yet.
 
 ## License
