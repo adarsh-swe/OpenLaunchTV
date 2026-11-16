@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#0B0E13</color>
+    <color name="tile_bg">#16202F</color>
+    <color name="tile_bg_focused">#242F42</color>
+    <color name="tile_stroke_focused">#5E7CA8</color>
+    <color name="text_primary">#F1F3F4</color>
+    <color name="text_secondary">#9AA0A6</color>
+</resources>

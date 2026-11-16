@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backdrop for the bar's two built-in icons (Hidden Apps, TV Settings):
+     a slate squircle so they read as app icons, not cards. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="23dp" />
+    <solid android:color="#242C3A" />
+</shape>

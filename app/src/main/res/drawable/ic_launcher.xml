@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple door glyph: rounded slab with a knob. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#8AB4F8"
+        android:pathData="M10,4 h28 a4,4 0 0 1 4,4 v36 h-8 V12 H14 v32 h-8 V8 a4,4 0 0 1 4,-4 z" />
+    <path
+        android:fillColor="#0B0E13"
+        android:pathData="M29,26 a2.5,2.5 0 1 1 -0.01,0 z" />
+</vector>

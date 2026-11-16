@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Focus halo for overflow-grid tiles: a soft radial glow behind the
+     icon instead of an elevation shadow. Elevation shadows trace the
+     view's square outline, which looks wrong behind icons whose art
+     isn't a full square (Play Store's glyph, wide banner icons). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <gradient
+        android:type="radial"
+        android:gradientRadius="95dp"
+        android:centerColor="#59507BB0"
+        android:endColor="#00507BB0" />
+</shape>
