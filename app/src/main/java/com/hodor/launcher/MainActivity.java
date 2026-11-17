@@ -29,7 +29,9 @@ import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.media.AudioAttributes;
 import android.media.MediaPlayer;
+import android.media.SoundPool;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -240,6 +242,14 @@ public class MainActivity extends Activity {
     private FrameLayout menuOverlay;
     private View menuReturnFocus;
 
+    // PSP XMB navigation sounds (cursor / decide / cancel) via SoundPool
+    // for near-zero latency. Ids stay 0 until each load finishes;
+    // playNav() no-ops on 0.
+    private SoundPool navPool;
+    private int sndCursor;
+    private int sndDecide;
+    private int sndCancel;
+
     private final Handler clockHandler = new Handler(Looper.getMainLooper());
     private final Runnable clockTick = new Runnable() {
         @Override
@@ -263,6 +273,15 @@ public class MainActivity extends Activity {
         hiddenPkgs = new HashSet<>(getSharedPreferences(PREFS, MODE_PRIVATE)
             .getStringSet(KEY_HIDDEN, Collections.emptySet()));
         setContentView(buildUi());
+        initNavSounds();
+        // PSP-style: tick whenever focus lands on a new view. The first
+        // focus after launch has no predecessor and stays silent.
+        getWindow().getDecorView().getViewTreeObserver()
+            .addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
+                if (oldFocus != null && newFocus != null && oldFocus != newFocus) {
+                    playNav(sndCursor);
+                }
+            });
 
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_PACKAGE_ADDED);
@@ -304,6 +323,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (navPool != null) {
+            navPool.release();
+            navPool = null;
+        }
         if (bgPlayer != null) {
             try {
                 bgPlayer.release();
@@ -325,6 +348,7 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         if (moveIndex >= 0) {
+            playNav(sndCancel);
             endMove(false);
             return;
         }
@@ -342,8 +366,17 @@ public class MainActivity extends Activity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            // PSP decide blip on any confirm press (repeat-safe).
+            int kc0 = event.getKeyCode();
+            if (event.getRepeatCount() == 0
+                    && (kc0 == KeyEvent.KEYCODE_DPAD_CENTER
+                        || kc0 == KeyEvent.KEYCODE_ENTER
+                        || kc0 == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+                playNav(sndDecide);
+            }
             if (menuOverlay != null) {
                 if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                    playNav(sndCancel);
                     closeMenu(true);
                     return true;
                 }
@@ -353,18 +386,28 @@ public class MainActivity extends Activity {
             // else goes to the focused widget or ghost untouched.
             if (widgetHost != null && widgetHost.isEditMode()) {
                 if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                    playNav(sndCancel);
                     widgetHost.exitEditMode();
                     return true;
+                }
+                int kc1 = event.getKeyCode();
+                if (kc1 == KeyEvent.KEYCODE_DPAD_LEFT
+                        || kc1 == KeyEvent.KEYCODE_DPAD_RIGHT
+                        || kc1 == KeyEvent.KEYCODE_DPAD_UP
+                        || kc1 == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    playNav(sndCursor);
                 }
                 return super.dispatchKeyEvent(event);
             }
             if (pickerOpen && moveIndex < 0
                     && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                playNav(sndCancel);
                 closeIconPicker();
                 return true;
             }
             if (expanded && !pickerOpen && moveIndex < 0
                     && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                playNav(sndCancel);
                 setExpanded(false);
                 return true;
             }
@@ -391,9 +434,11 @@ public class MainActivity extends Activity {
                 switch (event.getKeyCode()) {
                     case KeyEvent.KEYCODE_DPAD_LEFT:
                         moveTile(-1);
+                        playNav(sndCursor);
                         return true;
                     case KeyEvent.KEYCODE_DPAD_RIGHT:
                         moveTile(1);
+                        playNav(sndCursor);
                         return true;
                     case KeyEvent.KEYCODE_DPAD_UP:
                     case KeyEvent.KEYCODE_DPAD_DOWN:
@@ -421,6 +466,7 @@ public class MainActivity extends Activity {
         // MENU opens Android TV settings — a useful escape hatch that
         // doesn't cost a bar tile.
         if (keyCode == KeyEvent.KEYCODE_MENU && menuOverlay == null) {
+            playNav(sndDecide);
             startActivity(new Intent(Settings.ACTION_SETTINGS)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return true;
@@ -433,6 +479,25 @@ public class MainActivity extends Activity {
     private int dp(int value) {
         return (int) TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics());
+    }
+
+    /** Load the PSP XMB sounds (ripped from the PSP's system_plugin.rco). */
+    private void initNavSounds() {
+        AudioAttributes attrs = new AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build();
+        navPool = new SoundPool.Builder().setMaxStreams(4)
+            .setAudioAttributes(attrs).build();
+        sndCursor = navPool.load(this, R.raw.snd_cursor, 1);
+        sndDecide = navPool.load(this, R.raw.snd_decide, 1);
+        sndCancel = navPool.load(this, R.raw.snd_cancel, 1);
+    }
+
+    private void playNav(int soundId) {
+        if (navPool != null && soundId != 0) {
+            navPool.play(soundId, 0.15f, 0.15f, 1, 0, 1.0f);
+        }
     }
 
     /** Start the live-background player once its surface exists. */
@@ -554,7 +619,7 @@ public class MainActivity extends Activity {
             0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
 
         // Bebas Neue (bundled in assets) for the clock + date — tall,
-        // condensed display face picked 2026-11-15. Bebas runs
+        // condensed display face picked by Adarsh 2026-11-15. Bebas runs
         // narrow, so the clock goes bigger than the old 54sp stock face
         // to keep the same presence.
         Typeface bebas = Typeface.createFromAsset(getAssets(), "fonts/bebas-neue.ttf");
@@ -885,7 +950,7 @@ public class MainActivity extends Activity {
 
     private void populateAllApps() {
         allAppsGrid.removeAllViews();
-        // Settings lives here now (2026-11-16): a tile in the
+        // Settings lives here now (Adarsh, 2026-11-16): a tile in the
         // overflow section instead of a floating gear — the top-right
         // corner belongs to the weather widget.
         allAppsGrid.addView(makeSettingsTile());
@@ -966,7 +1031,7 @@ public class MainActivity extends Activity {
     private final Map<String, Drawable> cleanIconCache = new HashMap<>();
 
     /**
-     * The tile icon (2026-11-15): the app's art rendered
+     * The tile icon (Adarsh, 2026-11-15): the app's art rendered
      * full-bleed to a uniform square, original colours kept (a
      * filter-based dark mode was tried and dropped the same night —
      * it mangled the art). Corner rounding lives on the VIEW's outline
@@ -1470,7 +1535,7 @@ public class MainActivity extends Activity {
      * The Settings tile in the overflow grid: the gear glyph + label,
      * styled like the app tiles, but it fires the system Settings
      * intent and has no long-press menu — it isn't an app entry. It
-     * replaced the floating corner gear (2026-11-16), which
+     * replaced the floating corner gear (Adarsh, 2026-11-16), which
      * made room for the weather widget in the top-right corner.
      */
     private FrameLayout makeSettingsTile() {

@@ -45,7 +45,7 @@ import java.util.Locale;
  * (the settings gear that used to sit there is now a tile in the
  * overflow section), balancing the clock across the top of the
  * screen. The content follows the iOS Weather widget's clarity
- * (reference photo, 2026-11-16): filled white pictograms drawn
+ * (Adarsh's reference, 2026-11-16): filled white pictograms drawn
  * on canvas instead of unicode glyphs, the condition in a bold
  * sans sentence case, and a Feels-like line. Temperature and
  * place stay Bebas Neue — the launcher's own face — so the card
@@ -353,7 +353,7 @@ public class WeatherWidget extends Widget {
     private Bitmap makeFrost(Bitmap frame, int cx, int cy, int cw, int ch,
                              int w, int h) {
         Bitmap crop = Bitmap.createBitmap(frame, cx, cy, cw, ch);
-        // Recipe B (picked 2026-11-16): a lighter hand — /3
+        // Recipe B (Adarsh's pick, 2026-11-16): a lighter hand — /3
         // downscale with saturation lifted 1.25, one blur pass, tint
         // alpha 26 — so the blurred scene reads through the card
         // instead of flattening into a tinted slab. The frame already
