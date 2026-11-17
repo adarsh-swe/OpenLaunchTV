@@ -1,8 +1,11 @@
 package com.hodor.launcher;
 
 import android.app.Activity;
+import com.hodor.launcher.widgets.ClockWidget;
+import com.hodor.launcher.widgets.SystemWidget;
 import com.hodor.launcher.widgets.WeatherWidget;
 import com.hodor.launcher.widgets.WidgetHost;
+import com.hodor.launcher.widgets.WidgetPanel;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -221,8 +224,6 @@ public class MainActivity extends Activity {
     private ScrollView pickerScroll;
     private GridLayout pickerGrid;
     private TextView pickerTitle;
-    private TextView clockView;
-    private TextView dateView;
 
     /** Every launchable app, in saved order. Hidden ones included. */
     private List<AppEntry> currentApps = new ArrayList<>();
@@ -240,6 +241,7 @@ public class MainActivity extends Activity {
     private AppEntry pickerApp;
     private boolean pickerFromGrid = false;
     private FrameLayout menuOverlay;
+    private WidgetPanel widgetPanel;
     private View menuReturnFocus;
 
     // PSP XMB navigation sounds (cursor / decide / cancel) via SoundPool
@@ -249,15 +251,6 @@ public class MainActivity extends Activity {
     private int sndCursor;
     private int sndDecide;
     private int sndCancel;
-
-    private final Handler clockHandler = new Handler(Looper.getMainLooper());
-    private final Runnable clockTick = new Runnable() {
-        @Override
-        public void run() {
-            updateClock();
-            clockHandler.postDelayed(this, 15_000);
-        }
-    };
 
     private volatile boolean appsDirty = true;
     private final BroadcastReceiver packageReceiver = new BroadcastReceiver() {
@@ -296,7 +289,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        clockHandler.post(clockTick);
         if (widgetHost != null) widgetHost.startWidgets();
         if (appsDirty) reloadApps();
         if (bgPlayer != null) {
@@ -310,7 +302,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        clockHandler.removeCallbacks(clockTick);
         if (widgetHost != null) widgetHost.stopWidgets();
         if (bgPlayer != null) {
             try {
@@ -379,6 +370,23 @@ public class MainActivity extends Activity {
                     playNav(sndCancel);
                     closeMenu(true);
                     return true;
+                }
+                return super.dispatchKeyEvent(event);
+            }
+            // The Widgets panel owns the keys while it is open: BACK
+            // closes it, everything else goes to its rows.
+            if (widgetPanel != null) {
+                if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                    playNav(sndCancel);
+                    closeWidgetPanel();
+                    return true;
+                }
+                int kcp = event.getKeyCode();
+                if (kcp == KeyEvent.KEYCODE_DPAD_LEFT
+                        || kcp == KeyEvent.KEYCODE_DPAD_RIGHT
+                        || kcp == KeyEvent.KEYCODE_DPAD_UP
+                        || kcp == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    playNav(sndCursor);
                 }
                 return super.dispatchKeyEvent(event);
             }
@@ -465,7 +473,8 @@ public class MainActivity extends Activity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         // MENU opens Android TV settings — a useful escape hatch that
         // doesn't cost a bar tile.
-        if (keyCode == KeyEvent.KEYCODE_MENU && menuOverlay == null) {
+        if (keyCode == KeyEvent.KEYCODE_MENU && menuOverlay == null
+                && widgetPanel == null) {
             playNav(sndDecide);
             startActivity(new Intent(Settings.ACTION_SETTINGS)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -602,57 +611,17 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // Header: clock + date on the left. The header IS grid row A
-        // (LAYOUT.md): exactly one cell tall (100dp) from y=28, and the
-        // clock block spans A1+A2 — time at the top of the row, date
-        // pinned to its bottom, nothing hanging into row B.
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.TOP);
-        header.setClipChildren(false);
-        header.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(100)));
-
-        LinearLayout clockBlock = new LinearLayout(this);
-        clockBlock.setOrientation(LinearLayout.VERTICAL);
-        clockBlock.setLayoutParams(new LinearLayout.LayoutParams(
-            0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
-
-        // Bebas Neue (bundled in assets) for the clock + date — tall,
-        // condensed display face picked by Adarsh 2026-11-15. Bebas runs
-        // narrow, so the clock goes bigger than the old 54sp stock face
-        // to keep the same presence.
-        Typeface bebas = Typeface.createFromAsset(getAssets(), "fonts/bebas-neue.ttf");
-
-        clockView = new TextView(this);
-        clockView.setTextColor(getColor(R.color.text_primary));
-        clockView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 68);
-        clockView.setTypeface(bebas);
-        clockView.setIncludeFontPadding(false);
-
-        dateView = new TextView(this);
-        dateView.setTextColor(getColor(R.color.text_secondary));
-        dateView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
-        dateView.setTypeface(bebas);
-        dateView.setLetterSpacing(0.06f);
-        dateView.setIncludeFontPadding(false);
-
-        clockBlock.addView(clockView);
-        // Spacer: pushes the date to the bottom of row A.
-        View clockSpacer = new View(this);
-        clockSpacer.setLayoutParams(new LinearLayout.LayoutParams(1, 0, 1f));
-        clockBlock.addView(clockSpacer);
-        clockBlock.addView(dateView);
-        header.addView(clockBlock);
-
-        root.addView(header);
+        // Row A is widget territory now: the clock is a
+        // widget (ClockWidget) on the WidgetHost grid below.
 
         // Widget layer: self-contained widget apps (see widgets/).
         // Each widget owns its data and refresh; placements persist
         // and are the user's to move, remove and re-add in edit mode
         // (the Widgets tile in the overflow section).
         widgetHost = new WidgetHost(this);
+        widgetHost.registerWidget(new ClockWidget(this));
         widgetHost.registerWidget(new WeatherWidget(this));
+        widgetHost.registerWidget(new SystemWidget(this));
         widgetHost.setBackgroundView(bgVideo);
         widgetHost.setEditModeListener(this::focusBarFirstTile);
         rootFrame.addView(widgetHost, new FrameLayout.LayoutParams(
@@ -803,14 +772,7 @@ public class MainActivity extends Activity {
         pickerScroll.setVisibility(View.GONE);
         content.addView(pickerScroll);
 
-        updateClock();
         return rootFrame;
-    }
-
-    private void updateClock() {
-        Date now = new Date();
-        clockView.setText(new SimpleDateFormat("h:mm a", Locale.US).format(now));
-        dateView.setText(new SimpleDateFormat("EEEE, MMMM d", Locale.US).format(now));
     }
 
     // -------------------------------------------------------------- app list
@@ -970,6 +932,16 @@ public class MainActivity extends Activity {
         expanded = expand;
         if (expanded) populateAllApps();
         allAppsSection.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        // Widgets recede into the background while the app selector
+        // is open: scrolling the grid slides tiles up into their
+        // row, and at full strength the widgets sit on top of the
+        // tiles like a broken overlay (Adarsh, 2026-11-17).
+        if (widgetHost != null) {
+            widgetHost.animate()
+                .alpha(expanded ? 0.18f : 1f)
+                .setDuration(180)
+                .start();
+        }
         if (expandIcon != null) {
             expandIcon.setImageDrawable(getDrawable(expanded
                 ? R.drawable.ic_chevron_up : R.drawable.ic_chevron_down));
@@ -1585,8 +1557,9 @@ public class MainActivity extends Activity {
 
     /**
      * The Widgets tile in the overflow grid, next to Settings: opens
-     * the widget host's edit mode, where placed widgets can be moved
-     * on the grid, removed to the pool, and pooled widgets added.
+     * the Widgets panel, where each widget can be switched on or off
+     * (off keeps its spot remembered) and edit mode can be entered
+     * to rearrange them.
      */
     private FrameLayout makeWidgetsTile() {
         FrameLayout shell = tileShell(false);
@@ -1618,7 +1591,7 @@ public class MainActivity extends Activity {
 
         cell.setOnClickListener(v -> {
             setExpanded(false);
-            widgetHost.post(() -> widgetHost.enterEditMode());
+            openWidgetPanel();
         });
         cell.setOnFocusChangeListener((v, hasFocus) -> {
             icon.setImageDrawable(getDrawable(hasFocus
@@ -1632,6 +1605,26 @@ public class MainActivity extends Activity {
 
         shell.addView(cell);
         return shell;
+    }
+
+    /** Open the Widgets panel (enable/disable + rearrange entry). */
+    private void openWidgetPanel() {
+        if (widgetPanel != null || widgetHost == null) return;
+        widgetPanel = new WidgetPanel(this, widgetHost, () -> {
+            closeWidgetPanel();
+            widgetHost.post(() -> widgetHost.enterEditMode());
+        });
+        rootFrame.addView(widgetPanel, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT));
+        widgetPanel.post(widgetPanel::focusFirstRow);
+    }
+
+    private void closeWidgetPanel() {
+        if (widgetPanel == null) return;
+        rootFrame.removeView(widgetPanel);
+        widgetPanel = null;
+        focusBarFirstTile();
     }
 
     /** After widget edit mode ends: d-pad focus back on the bar. */

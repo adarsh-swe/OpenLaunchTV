@@ -28,8 +28,8 @@ import java.util.Map;
  * shared constants. No custom sizes, no off-grid offsets: two widgets
  * with the same span are pixel-identical in size, wherever they sit.
  *
- * Placement: cells A1+A2 (row 0, columns 0-1) belong to the clock
- * block and are reserved. Every other cell is fair game. A widget's
+ * Placement: every cell is fair game — the clock is a widget like
+ * any other. A widget's
  * default placement comes from its anchor (TOP_RIGHT = the top row's
  * rightmost cells, e.g. a 2x1 lands on A3+A4); after that, placements
  * are the user's — they persist across restarts.
@@ -37,7 +37,8 @@ import java.util.Map;
  * Edit mode (entered from the Widgets tile in the overflow section):
  * placed widgets become focusable; the d-pad moves the focused
  * widget cell by cell (grid-snapped, collision-checked), ENTER
- * finishes, MENU removes the widget back to the pool, BACK exits.
+ * cycles focus to the next widget, MENU removes the widget back
+ * to the pool, BACK exits.
  * Widgets not on the home screen appear as a "+ NAME" ghost at the
  * first free cell; steering it and pressing ENTER adds the widget
  * there. Outside edit mode widgets are display-only again.
@@ -114,7 +115,8 @@ public class WidgetHost extends FrameLayout {
 
         String saved = prefs.getString(w.id(), null);
         if (REMOVED.equals(saved)) return; // user took it off: pool
-        if (saved != null) {
+        int savedVersion = prefs.getInt(w.id() + "#v", 1);
+        if (saved != null && savedVersion >= w.placementVersion()) {
             String[] parts = saved.split(",");
             int c = Integer.parseInt(parts[0]);
             int r = Integer.parseInt(parts[1]);
@@ -130,8 +132,12 @@ public class WidgetHost extends FrameLayout {
         }
     }
 
-    /** The widget's anchor cell if free, else the first free fit. */
+    /** The widget's preferred/anchor cell if free, else first free fit. */
     private int[] defaultSpot(Widget w) {
+        if (w.defaultCol() >= 0 && w.defaultRow() >= 0
+                && cellsFree(w, w.defaultCol(), w.defaultRow())) {
+            return new int[]{w.defaultCol(), w.defaultRow()};
+        }
         if (w.anchor() == Widget.ANCHOR_TOP_RIGHT) {
             int c = COLUMNS - w.colSpan();
             if (cellsFree(w, c, 0)) return new int[]{c, 0};
@@ -157,16 +163,62 @@ public class WidgetHost extends FrameLayout {
     private void unplace(Widget w, boolean markRemoved) {
         if (running) w.onStop();
         removeView(w.view());
-        placements.remove(w.id());
+        int[] p = placements.remove(w.id());
         if (markRemoved) {
-            prefs.edit().putString(w.id(), REMOVED).apply();
+            SharedPreferences.Editor e = prefs.edit()
+                .putString(w.id(), REMOVED);
+            // Remember the spot, so re-enabling (panel toggle or a
+            // later edit-mode add) can offer the widget its home back.
+            if (p != null) e.putString(w.id() + "#last", p[0] + "," + p[1]);
+            e.apply();
         }
+    }
+
+    // ---- enable / disable (the Widgets panel) -----------------------
+
+    /** Every registered widget, in registration order. */
+    public List<Widget> widgets() {
+        return new ArrayList<>(registered);
+    }
+
+    /** True if the widget is currently on the home screen. */
+    public boolean isPlaced(Widget w) {
+        return placements.containsKey(w.id());
+    }
+
+    /**
+     * Turn a widget on or off outside edit mode. Off removes it from
+     * the home screen (its spot is remembered). On restores it to its
+     * remembered spot if that is free, else to its default spot, else
+     * to the first free fit. Returns false only when turning on and
+     * no cell on the grid can take the widget.
+     */
+    public boolean setWidgetEnabled(Widget w, boolean on) {
+        if (!on) {
+            if (placements.containsKey(w.id())) unplace(w, true);
+            return true;
+        }
+        if (placements.containsKey(w.id())) return true;
+        int[] spot = null;
+        String last = prefs.getString(w.id() + "#last", null);
+        if (last != null) {
+            String[] parts = last.split(",");
+            int c = Integer.parseInt(parts[0]);
+            int r = Integer.parseInt(parts[1]);
+            if (cellsFree(w, c, r)) spot = new int[]{c, r};
+        }
+        if (spot == null) spot = defaultSpot(w);
+        if (spot == null) return false;
+        place(w, spot[0], spot[1]);
+        save(w);
+        return true;
     }
 
     private void save(Widget w) {
         int[] p = placements.get(w.id());
         if (p != null) {
-            prefs.edit().putString(w.id(), p[0] + "," + p[1]).apply();
+            prefs.edit().putString(w.id(), p[0] + "," + p[1])
+                .putInt(w.id() + "#v", w.placementVersion()).apply();
         }
     }
 
@@ -185,18 +237,14 @@ public class WidgetHost extends FrameLayout {
     }
 
     /**
-     * True if the widget's span fits at (col, row): inside the grid,
-     * clear of the clock's cells (A1+A2) and of every placed widget
-     * except {@code self}.
+     * True if the widget's span fits at (col, row): inside the grid
+     * and clear of every placed widget except {@code self}.
      */
     private boolean cellsFree(Widget self, int col, int row) {
         int spanW = self.colSpan(), spanH = self.rowSpan();
         if (col < 0 || row < 0
                 || col + spanW > COLUMNS || row + spanH > ROWS) {
             return false;
-        }
-        for (int c = col; c < col + spanW; c++) {
-            if (row == 0 && c < 2) return false; // the clock's cells
         }
         for (Map.Entry<String, int[]> e : placements.entrySet()) {
             if (e.getKey().equals(self.id())) continue;
@@ -303,7 +351,7 @@ public class WidgetHost extends FrameLayout {
                 if (v == ghost) {
                     placeGhost();
                 } else {
-                    exitEditMode();
+                    focusNext(v);
                 }
                 return true;
             case KeyEvent.KEYCODE_MENU:
@@ -313,6 +361,23 @@ public class WidgetHost extends FrameLayout {
                 return false;
         }
     };
+
+    /**
+     * Cycle edit-mode focus through the placed widgets and the
+     * ghost. The arrow keys steer the focused widget, so without
+     * this the first widget to take focus would trap it — with a
+     * single widget that never showed; with two it made the second
+     * one unreachable.
+     */
+    private void focusNext(View current) {
+        List<View> order = new ArrayList<>();
+        for (String id : placements.keySet()) order.add(byId(id).view());
+        if (ghost != null) order.add(ghost);
+        if (order.size() < 2) return;
+        int i = order.indexOf(current);
+        View next = order.get((i + 1) % order.size());
+        next.post(next::requestFocus);
+    }
 
     private void nudge(View v, int dx, int dy) {
         if (v == ghost) {
@@ -413,7 +478,7 @@ public class WidgetHost extends FrameLayout {
 
     private void showHint() {
         hint = new TextView(getContext());
-        hint.setText("ARROWS MOVE · ENTER DONE · MENU REMOVE · BACK EXIT");
+        hint.setText("ARROWS MOVE · ENTER NEXT WIDGET · MENU REMOVE · BACK DONE");
         hint.setTextColor(Color.rgb(205, 212, 226));
         hint.setTextSize(13);
         hint.setLetterSpacing(0.08f);

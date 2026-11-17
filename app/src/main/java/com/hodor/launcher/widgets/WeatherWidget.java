@@ -99,20 +99,13 @@ public class WeatherWidget extends Widget {
     }
 
     @Override public String id() { return "weather"; }
+    @Override public String description() { return "Menlo Park forecast"; }
     @Override public int colSpan() { return 2; }
     @Override public int rowSpan() { return 1; }
     @Override public int anchor() { return ANCHOR_TOP_RIGHT; }
 
-    // The drawn card frames the clock block's measured glyph
-    // extent (TV frame, 2026-11-16: time glyphs 40.5dp, date
-    // glyphs end 133dp) with ~4dp of air on each side, so the two
-    // header blocks read as one uniform band. (An exact-extent
-    // 93dp card read as shorter than the clock — the frost's
-    // feathered edge eats ~2dp of visible body per side.)
-    // Placement stays cell-based. Re-measure if the clock's
-    // type sizes change.
-    @Override public int topInsetDp() { return 8; }
-    @Override public int heightDp() { return 101; }
+    // The card fills its cells exactly (no inset / custom height),
+    // so the top row's cards share one top and bottom edge.
 
     // ---- view ------------------------------------------------------
 

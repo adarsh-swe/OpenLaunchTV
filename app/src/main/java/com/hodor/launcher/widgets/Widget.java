@@ -4,6 +4,8 @@ import android.content.Context;
 import android.view.TextureView;
 import android.view.View;
 
+import java.util.Locale;
+
 /**
  * A widget is a self-contained mini-app that lives on the launcher's
  * widget grid. It owns its data, its refresh cycle and its rendering.
@@ -38,6 +40,17 @@ public abstract class Widget {
     /** Stable identifier, e.g. "weather". */
     public abstract String id();
 
+    /** Human-readable name for menus and panels. */
+    public String displayName() {
+        String id = id();
+        return id.substring(0, 1).toUpperCase(Locale.US) + id.substring(1);
+    }
+
+    /** One-line description for menus and panels. */
+    public String description() {
+        return "";
+    }
+
     /** Width on the widget grid, in cells (1 or 2 — never wider). */
     public abstract int colSpan();
 
@@ -47,6 +60,25 @@ public abstract class Widget {
     /** Where the host places this widget. Default: the grid. */
     public int anchor() {
         return ANCHOR_GRID;
+    }
+
+    /** Preferred default cell (column) on first placement, or -1. */
+    public int defaultCol() {
+        return -1;
+    }
+
+    /** Preferred default cell (row) on first placement, or -1. */
+    public int defaultRow() {
+        return -1;
+    }
+
+    /**
+     * Bump when a widget's default placement changes: a saved cell
+     * from an older version is ignored once and the widget lands at
+     * its new default. A user removal (pool) survives version bumps.
+     */
+    public int placementVersion() {
+        return 1;
     }
 
     /**
