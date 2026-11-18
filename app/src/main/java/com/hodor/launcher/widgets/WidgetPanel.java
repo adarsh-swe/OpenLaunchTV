@@ -75,10 +75,16 @@ public class WidgetPanel extends FrameLayout {
         card.addView(rearrangeRow());
 
         // Chain d-pad focus strictly through the rows, so focus can
-        // never escape into the home screen behind the panel.
+        // never escape into the home screen behind the panel. IDs are
+        // assigned in a separate first pass: chaining in the same loop
+        // reads the NEXT row's ID before that row has been given one
+        // (still NO_ID), which silently breaks every Down link and
+        // drops focus into the app bar behind the panel.
+        for (View row : rows) {
+            row.setId(View.generateViewId());
+        }
         for (int i = 0; i < rows.size(); i++) {
             View row = rows.get(i);
-            row.setId(View.generateViewId());
             row.setNextFocusUpId(i == 0 ? row.getId() : rows.get(i - 1).getId());
             row.setNextFocusDownId(i == rows.size() - 1
                 ? row.getId() : rows.get(i + 1).getId());
